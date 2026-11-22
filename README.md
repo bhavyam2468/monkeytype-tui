@@ -103,7 +103,7 @@ cargo build --release
 | `Esc` | Open or close config bar (`Left`/`Right` + `Enter`, `q` to quit) |
 | `Ctrl+C` | Quit immediately |
 
-On the results screen: `Tab` / `Enter` / `n` starts a new test, `r` repeats the same words, `t` cycles themes, and `Esc` / `q` quits.
+On the results screen: `Tab` / `Enter` starts a new test, `Ctrl+R` repeats the same words, `F2` cycles themes, `F3` opens settings, and `Esc` quits. Stray letter keystrokes are ignored so finishing mid-word never accidentally restarts or exits.
 
 ---
 

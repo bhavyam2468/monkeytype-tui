@@ -703,7 +703,7 @@ fn draw_results(frame: &mut Frame, area: Rect, state: &AppViewState<'_>, res: &T
         );
     }
 
-    let actions = "[Tab / Enter] new test   [r] repeat   [F2 / t] theme   [F3] settings   [Esc / q] quit";
+    let actions = "[Tab / Enter] new test   [Ctrl+R] repeat   [F2] theme   [F3] settings   [Esc] quit";
     frame.render_widget(
         Paragraph::new(actions)
             .alignment(Alignment::Center)

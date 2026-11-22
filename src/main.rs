@@ -333,7 +333,7 @@ fn run_app(
 
                 if engine.finished {
                     match key.code {
-                        KeyCode::Tab | KeyCode::Enter | KeyCode::Char('n') | KeyCode::Char('N') => {
+                        KeyCode::Tab | KeyCode::Enter => {
                             engine.reset(true);
                             effects.reset_positions(settings.restart_scramble);
                             last_result = None;
@@ -341,24 +341,7 @@ fn run_app(
                             result_shown_at = None;
                             recorded_current = false;
                         }
-                        KeyCode::Char('r') | KeyCode::Char('R') => {
-                            engine.reset(false);
-                            effects.reset_positions(settings.restart_scramble);
-                            last_result = None;
-                            last_is_pb = false;
-                            result_shown_at = None;
-                            recorded_current = false;
-                        }
-                        KeyCode::Char('t') | KeyCode::Char('T') => {
-                            start_theme_fade(
-                                &active_rendered_theme,
-                                settings.theme_fade,
-                                &mut fade_from,
-                                &mut fade_started,
-                            );
-                            theme_idx = (theme_idx + 1) % themes.len();
-                        }
-                        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => break,
+                        KeyCode::Esc => break,
                         _ => {}
                     }
                     continue;
