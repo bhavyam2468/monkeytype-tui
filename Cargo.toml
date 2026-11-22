@@ -1,6 +1,6 @@
 [package]
 name = "monkeytype-tui"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "A fast, minimalist terminal typing test with Kitty cursor trail support, ASCII animations, and DMS theme sync"
 license = "MIT"

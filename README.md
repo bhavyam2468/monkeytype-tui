@@ -24,7 +24,16 @@
 
 - **Authentic Typing Modes**: `time` (15s, 30s, 60s, 120s), `words` (10, 25, 50, 100), and `quote` mode with optional `@ punct` and `# nums` modifiers.
 - **Native Kitty Cursor Trail Support**: Positions the real terminal hardware cursor on every keystroke and line wrap so Kitty's GPU `cursor_trail` works natively inside the app. Includes an optional software RGB trail (`Ctrl+L`) for other terminals.
-- **60 FPS ASCII Animations**: Reactive ASCII typing mascot in the header (blinks when idle, speeds up with WPM, celebrates streaks and new personal bests), floating word completion sparks, error flashes, and a live keystroke equalizer wave.
+- **60 FPS Animations & Effects (All Toggleable in Settings)**:
+  - **Line Scroll Fade**: Smoothly fades in newly revealed lines as the 3-line viewport advances.
+  - **Pace Caret (Ghost Racer)**: Dimmed ghost cursor moving at your personal best WPM so you can race your own PB live.
+  - **Restart Scramble**: Brief glitch-decode sweep across newly generated words on restart.
+  - **Live Mini Keyboard Heatmap**: Compact QWERTY layout below the text where keys flash on every press and fade smoothly.
+  - **Combo Aura & PB Confetti**: Breathing streak progress bar at 25x+ combos and gentle ASCII confetti rain on new personal bests.
+  - **Typo Micro-Shake**: Tactile 1-cell horizontal nudge on missed keystrokes.
+  - **Smooth Theme Cross-Fade**: RGB interpolation when switching themes (`F2`) or when DMS updates your system palette.
+  - **ASCII Mascot, Word Sparks & Keystroke Wave**: Reactive typing mascot, floating sparks, and live equalizer wave.
+  - Press **`F3`** (or select `settings` in the `Esc` bar) to toggle any effect individually or switch to Zen mode (`n`). Settings persist in `~/.local/share/monkeytype-tui/settings.json`.
 - **Centered Results Dashboard**: Animated WPM and accuracy count-up, full-width interpolated WPM-over-time chart with error markers, raw WPM, consistency, max combo, and character breakdown (`correct/incorrect/extra/missed`).
 - **Live DMS Theme Sync**: Automatically reads `~/.cache/dms/dms-colors.json` from DankMaterialShell (dark and light mode) and hot-reloads colors when your system theme changes.
 - **Built-in Color Themes**: `dms_sync`, `serika_dark`, `catppuccin`, `dracula`, `nord`, `gruvbox`, and `matrix`.
@@ -39,21 +48,21 @@ Pre-built Linux packages are available on the [Releases](https://github.com/bhav
 ### AppImage (Universal Linux)
 
 ```bash
-chmod +x monkeytype-tui-0.1.0-x86_64.AppImage
-./monkeytype-tui-0.1.0-x86_64.AppImage
+chmod +x monkeytype-tui-0.2.0-x86_64.AppImage
+./monkeytype-tui-0.2.0-x86_64.AppImage
 ```
 
 ### Debian / Ubuntu (`.deb`)
 
 ```bash
-sudo apt install ./monkeytype-tui_0.1.0_amd64.deb
+sudo apt install ./monkeytype-tui_0.2.0_amd64.deb
 monkeytype-tui
 ```
 
 ### Arch Linux (`.pkg.tar.zst` / `PKGBUILD`)
 
 ```bash
-sudo pacman -U monkeytype-tui-0.1.0-1-x86_64.pkg.tar.zst
+sudo pacman -U monkeytype-tui-0.2.0-1-x86_64.pkg.tar.zst
 ```
 
 Or build locally from the included `PKGBUILD`:
@@ -65,8 +74,8 @@ cd packaging && makepkg -si
 ### Standalone Binary Tarball (`.tar.gz`)
 
 ```bash
-tar -xzf monkeytype-tui-0.1.0-x86_64-linux.tar.gz
-cd monkeytype-tui-0.1.0-x86_64-linux
+tar -xzf monkeytype-tui-0.2.0-x86_64-linux.tar.gz
+cd monkeytype-tui-0.2.0-x86_64-linux
 ./monkeytype-tui
 ```
 
@@ -89,6 +98,7 @@ cargo build --release
 | `Ctrl+R` | Repeat the same words |
 | `Ctrl+W` / `Ctrl+Backspace` | Delete current word |
 | `F2` / `Alt+T` | Cycle color theme |
+| `F3` | Open animation and visual settings modal |
 | `Ctrl+L` | Toggle software RGB cursor trail |
 | `Ctrl+K` | Cycle caret style (when software trail is active) |
 | `Esc` | Open or close config bar (`Left`/`Right` + `Enter`, `q` to quit) |

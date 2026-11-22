@@ -18,8 +18,12 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use crate::effects::CursorEffects;
-use crate::engine::{CharOutcome, Mode, TestConfig, TestResult, TypingEngine, TIME_OPTIONS, WORD_OPTIONS};
-use crate::storage::{load_stats, record_result};
+use crate::engine::{
+    CharOutcome, Mode, TestConfig, TestResult, TypingEngine, TIME_OPTIONS, WORD_OPTIONS,
+};
+use crate::storage::{
+    load_settings, load_stats, record_result, save_settings, AnimSettings,
+};
 use crate::themes::{
     build_theme_list, dms_colors_mtime, find_theme_index, load_dms_theme, Theme,
 };
@@ -33,7 +37,11 @@ enum CliMode {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "monkeytype-tui", version, about = "A fast, minimalist terminal typing test with cursor animations and DMS theme sync")]
+#[command(
+    name = "monkeytype-tui",
+    version,
+    about = "A fast, minimalist terminal typing test with cursor animations and DMS theme sync"
+)]
 struct Cli {
     #[arg(short, long, value_enum, default_value_t = CliMode::Time)]
     mode: CliMode,
@@ -74,8 +82,16 @@ fn main() -> io::Result<()> {
             CliMode::Words => Mode::Words,
             CliMode::Quote => Mode::Quote,
         },
-        duration_secs: if TIME_OPTIONS.contains(&cli.time) { cli.time } else { 30 },
-        word_count: if WORD_OPTIONS.contains(&cli.words) { cli.words } else { 25 },
+        duration_secs: if TIME_OPTIONS.contains(&cli.time) {
+            cli.time
+        } else {
+            30
+        },
+        word_count: if WORD_OPTIONS.contains(&cli.words) {
+            cli.words
+        } else {
+            25
+        },
         punctuation: cli.punctuation,
         numbers: cli.numbers,
     };
@@ -106,11 +122,20 @@ fn run_app(
     let mut engine = TypingEngine::new(config);
     let mut effects = CursorEffects::new();
     let mut stats = load_stats(None);
+    let mut settings = load_settings();
+
     let mut last_dms_mtime = dms_colors_mtime();
     let mut last_dms_check = Instant::now();
 
+    let mut fade_from: Option<Theme> = None;
+    let mut fade_started: Option<Instant> = None;
+    let mut active_rendered_theme = themes[theme_idx].clone();
+
     let mut config_mode = false;
     let mut config_cursor = 0usize;
+    let mut settings_open = false;
+    let mut settings_cursor = 0usize;
+
     let mut last_result: Option<TestResult> = None;
     let mut last_is_pb = false;
     let mut result_shown_at: Option<Instant> = None;
@@ -119,10 +144,26 @@ fn run_app(
     let app_start = Instant::now();
     let mut last_frame = Instant::now();
 
+    let start_theme_fade = |from_theme: &Theme,
+                            enabled: bool,
+                            fade_from: &mut Option<Theme>,
+                            fade_started: &mut Option<Instant>| {
+        if enabled {
+            *fade_from = Some(from_theme.clone());
+            *fade_started = Some(Instant::now());
+        } else {
+            *fade_from = None;
+            *fade_started = None;
+        }
+    };
+
     loop {
         let now = Instant::now();
         let dt = now.duration_since(last_frame);
         last_frame = now;
+
+        let size = terminal.size()?;
+        let area = ratatui::layout::Rect::new(0, 0, size.width, size.height);
 
         // Live-sync with DMS theme changes every ~1s
         if now.duration_since(last_dms_check) >= Duration::from_secs(1) {
@@ -131,6 +172,15 @@ fn run_app(
             if cur_mtime != last_dms_mtime {
                 last_dms_mtime = cur_mtime;
                 if let Some(dms_theme) = load_dms_theme() {
+                    let was_on_dms = themes[theme_idx].name == "dms_sync";
+                    if was_on_dms {
+                        start_theme_fade(
+                            &active_rendered_theme,
+                            settings.theme_fade,
+                            &mut fade_from,
+                            &mut fade_started,
+                        );
+                    }
                     if let Some(pos) = themes.iter().position(|t| t.name == "dms_sync") {
                         themes[pos] = dms_theme;
                     } else {
@@ -141,6 +191,21 @@ fn run_app(
             }
         }
 
+        // Compute cross-faded theme if transitioning
+        active_rendered_theme = if let (Some(ref from), Some(started)) = (&fade_from, fade_started)
+        {
+            let t = (started.elapsed().as_secs_f32() / 0.26).clamp(0.0, 1.0);
+            if t >= 1.0 {
+                fade_from = None;
+                fade_started = None;
+                themes[theme_idx].clone()
+            } else {
+                from.lerp(&themes[theme_idx], t)
+            }
+        } else {
+            themes[theme_idx].clone()
+        };
+
         if engine.tick(dt) || (engine.finished && !recorded_current) {
             if engine.finished && !recorded_current {
                 let res = engine.result();
@@ -150,22 +215,27 @@ fn run_app(
                 result_shown_at = Some(Instant::now());
                 recorded_current = true;
                 config_mode = false;
+                if last_is_pb && settings.combo_aura {
+                    effects.spawn_pb_confetti(area.width, area.height);
+                }
             }
         }
 
-        let size = terminal.size()?;
-        let area = ratatui::layout::Rect::new(0, 0, size.width, size.height);
-        let (cx, cy) = compute_caret_screen_pos(&engine, area);
-        effects.update(cx, cy, dt.as_secs_f32());
+        let nudge = effects.typo_nudge_offset(settings.typo_nudge);
+        let (cx, cy) = compute_caret_screen_pos(&engine, area, settings.mini_keyboard, nudge);
+        effects.update(cx, cy, area.width, area.height, dt.as_secs_f32(), &settings);
 
         terminal.draw(|frame| {
             let mut view = AppViewState {
                 engine: &engine,
-                theme: &themes[theme_idx],
+                theme: &active_rendered_theme,
                 effects: &mut effects,
                 stats: &stats,
+                settings: &settings,
                 config_mode,
                 config_cursor,
+                settings_open,
+                settings_cursor,
                 last_result: last_result.as_ref(),
                 last_is_pb,
                 result_shown_at,
@@ -185,31 +255,74 @@ fn run_app(
                     break;
                 }
 
-                // Global F2 or Alt+T -> cycle theme (avoids Kitty's Ctrl+T new-tab shortcut)
+                // Global F3 -> toggle Settings modal
+                if key.code == KeyCode::F(3) {
+                    settings_open = !settings_open;
+                    continue;
+                }
+
+                // Global F2 or Alt+T -> cycle theme
                 if key.code == KeyCode::F(2)
                     || (key.modifiers.contains(KeyModifiers::ALT)
                         && matches!(key.code, KeyCode::Char('t') | KeyCode::Char('T')))
                 {
+                    start_theme_fade(
+                        &active_rendered_theme,
+                        settings.theme_fade,
+                        &mut fade_from,
+                        &mut fade_started,
+                    );
                     theme_idx = (theme_idx + 1) % themes.len();
                     continue;
                 }
 
-                // Global Ctrl+K -> cycle caret style
+                // Settings modal input
+                if settings_open {
+                    match key.code {
+                        KeyCode::Esc | KeyCode::Tab | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                            settings_open = false;
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            settings_cursor =
+                                (settings_cursor + AnimSettings::COUNT - 1) % AnimSettings::COUNT;
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            settings_cursor = (settings_cursor + 1) % AnimSettings::COUNT;
+                        }
+                        KeyCode::Enter | KeyCode::Char(' ') => {
+                            settings.toggle(settings_cursor);
+                            save_settings(&settings);
+                        }
+                        KeyCode::Char('a') | KeyCode::Char('A') => {
+                            settings.set_all_animations(true);
+                            save_settings(&settings);
+                        }
+                        KeyCode::Char('n') | KeyCode::Char('N') => {
+                            settings.set_all_animations(false);
+                            save_settings(&settings);
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+
+                // Global Ctrl+K -> cycle software caret style
                 if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('k') {
                     effects.caret_style = effects.caret_style.next();
                     continue;
                 }
 
-                // Global Ctrl+L -> toggle cursor trail
+                // Global Ctrl+L -> toggle software RGB trail
                 if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('l') {
-                    effects.trail_enabled = !effects.trail_enabled;
+                    settings.soft_trail = !settings.soft_trail;
+                    save_settings(&settings);
                     continue;
                 }
 
                 // Global Ctrl+R -> repeat same words
                 if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('r') {
                     engine.reset(false);
-                    effects.reset_positions();
+                    effects.reset_positions(settings.restart_scramble);
                     last_result = None;
                     last_is_pb = false;
                     result_shown_at = None;
@@ -222,7 +335,7 @@ fn run_app(
                     match key.code {
                         KeyCode::Tab | KeyCode::Enter | KeyCode::Char('n') | KeyCode::Char('N') => {
                             engine.reset(true);
-                            effects.reset_positions();
+                            effects.reset_positions(settings.restart_scramble);
                             last_result = None;
                             last_is_pb = false;
                             result_shown_at = None;
@@ -230,13 +343,19 @@ fn run_app(
                         }
                         KeyCode::Char('r') | KeyCode::Char('R') => {
                             engine.reset(false);
-                            effects.reset_positions();
+                            effects.reset_positions(settings.restart_scramble);
                             last_result = None;
                             last_is_pb = false;
                             result_shown_at = None;
                             recorded_current = false;
                         }
                         KeyCode::Char('t') | KeyCode::Char('T') => {
+                            start_theme_fade(
+                                &active_rendered_theme,
+                                settings.theme_fade,
+                                &mut fade_from,
+                                &mut fade_started,
+                            );
                             theme_idx = (theme_idx + 1) % themes.len();
                         }
                         KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => break,
@@ -246,7 +365,7 @@ fn run_app(
                 }
 
                 if config_mode {
-                    let labels = config_item_labels(&engine, &themes[theme_idx], &effects);
+                    let labels = config_item_labels(&engine, &themes[theme_idx], &settings);
                     let len = labels.len();
                     config_cursor = config_cursor.min(len.saturating_sub(1));
                     match key.code {
@@ -260,16 +379,30 @@ fn run_app(
                         }
                         KeyCode::Enter | KeyCode::Char(' ') => {
                             let label = labels[config_cursor].0.as_str();
-                            apply_config_action(
-                                label,
-                                &mut engine,
-                                &mut effects,
-                                &mut theme_idx,
-                                themes.len(),
-                            );
-                            last_result = None;
-                            last_is_pb = false;
-                            recorded_current = false;
+                            if label == "settings" {
+                                settings_open = true;
+                                config_mode = false;
+                            } else {
+                                if label.starts_with("theme:") {
+                                    start_theme_fade(
+                                        &active_rendered_theme,
+                                        settings.theme_fade,
+                                        &mut fade_from,
+                                        &mut fade_started,
+                                    );
+                                }
+                                apply_config_action(
+                                    label,
+                                    &mut engine,
+                                    &mut effects,
+                                    &settings,
+                                    &mut theme_idx,
+                                    themes.len(),
+                                );
+                                last_result = None;
+                                last_is_pb = false;
+                                recorded_current = false;
+                            }
                         }
                         _ => {}
                     }
@@ -280,7 +413,7 @@ fn run_app(
                 match key.code {
                     KeyCode::Tab => {
                         engine.reset(true);
-                        effects.reset_positions();
+                        effects.reset_positions(settings.restart_scramble);
                         last_result = None;
                         last_is_pb = false;
                         recorded_current = false;
@@ -302,16 +435,23 @@ fn run_app(
                         engine.handle_delete_word();
                     }
                     KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        let (pre_x, pre_y) = compute_caret_screen_pos(&engine, area);
+                        let (pre_x, pre_y) =
+                            compute_caret_screen_pos(&engine, area, settings.mini_keyboard, nudge);
                         match engine.handle_char(ch) {
                             CharOutcome::Correct => {
-                                effects.trigger_keystroke(pre_x, pre_y, false, false);
+                                effects.trigger_keystroke(
+                                    ch, pre_x, pre_y, false, false, &settings,
+                                );
                             }
                             CharOutcome::Error => {
-                                effects.trigger_keystroke(pre_x, pre_y, true, false);
+                                effects.trigger_keystroke(
+                                    ch, pre_x, pre_y, true, false, &settings,
+                                );
                             }
                             CharOutcome::WordCompleted { clean } => {
-                                effects.trigger_keystroke(pre_x, pre_y, !clean, clean);
+                                effects.trigger_keystroke(
+                                    ch, pre_x, pre_y, !clean, clean, &settings,
+                                );
                             }
                             CharOutcome::Ignored => {}
                         }
@@ -322,6 +462,9 @@ fn run_app(
                             last_result = Some(res);
                             result_shown_at = Some(Instant::now());
                             recorded_current = true;
+                            if last_is_pb && settings.combo_aura {
+                                effects.spawn_pb_confetti(area.width, area.height);
+                            }
                         }
                     }
                     _ => {}
@@ -337,6 +480,7 @@ fn apply_config_action(
     label: &str,
     engine: &mut TypingEngine,
     effects: &mut CursorEffects,
+    settings: &AnimSettings,
     theme_idx: &mut usize,
     theme_count: usize,
 ) {
@@ -344,33 +488,27 @@ fn apply_config_action(
         "@ punct" => {
             engine.config.punctuation = !engine.config.punctuation;
             engine.reset(true);
-            effects.reset_positions();
+            effects.reset_positions(settings.restart_scramble);
         }
         "# nums" => {
             engine.config.numbers = !engine.config.numbers;
             engine.reset(true);
-            effects.reset_positions();
+            effects.reset_positions(settings.restart_scramble);
         }
         "time" => {
             engine.config.mode = Mode::Time;
             engine.reset(true);
-            effects.reset_positions();
+            effects.reset_positions(settings.restart_scramble);
         }
         "words" => {
             engine.config.mode = Mode::Words;
             engine.reset(true);
-            effects.reset_positions();
+            effects.reset_positions(settings.restart_scramble);
         }
         "quote" => {
             engine.config.mode = Mode::Quote;
             engine.reset(true);
-            effects.reset_positions();
-        }
-        s if s.starts_with("caret:") => {
-            effects.caret_style = effects.caret_style.next();
-        }
-        s if s.starts_with("trail:") => {
-            effects.trail_enabled = !effects.trail_enabled;
+            effects.reset_positions(settings.restart_scramble);
         }
         s if s.starts_with("theme:") => {
             *theme_idx = (*theme_idx + 1) % theme_count;
@@ -383,7 +521,7 @@ fn apply_config_action(
                     Mode::Quote => {}
                 }
                 engine.reset(true);
-                effects.reset_positions();
+                effects.reset_positions(settings.restart_scramble);
             }
         }
     }

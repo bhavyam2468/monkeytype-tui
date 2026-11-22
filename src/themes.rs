@@ -211,3 +211,21 @@ pub fn lerp_color(a: Color, b: Color, t: f32) -> Color {
         b
     }
 }
+
+impl Theme {
+    pub fn lerp(&self, target: &Theme, t: f32) -> Theme {
+        Theme {
+            name: target.name.clone(),
+            bg: lerp_color(self.bg, target.bg, t),
+            surface: lerp_color(self.surface, target.surface, t),
+            accent: lerp_color(self.accent, target.accent, t),
+            accent_dim: lerp_color(self.accent_dim, target.accent_dim, t),
+            text: lerp_color(self.text, target.text, t),
+            muted: lerp_color(self.muted, target.muted, t),
+            error: lerp_color(self.error, target.error, t),
+            extra: lerp_color(self.extra, target.extra, t),
+            caret_fg: lerp_color(self.caret_fg, target.caret_fg, t),
+            caret_bg: lerp_color(self.caret_bg, target.caret_bg, t),
+        }
+    }
+}

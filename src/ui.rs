@@ -4,12 +4,12 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
-use crate::effects::{keystroke_wave, monkey_mascot, CaretStyle, CursorEffects};
+use crate::effects::{keystroke_wave, monkey_mascot, scramble_glyph, CaretStyle, CursorEffects};
 use crate::engine::{Mode, TestResult, TypingEngine, TIME_OPTIONS, WORD_OPTIONS};
-use crate::storage::StatsData;
+use crate::storage::{AnimSettings, StatsData};
 use crate::themes::{lerp_color, Theme};
 
 #[derive(Clone, Debug)]
@@ -23,8 +23,11 @@ pub struct AppViewState<'a> {
     pub theme: &'a Theme,
     pub effects: &'a mut CursorEffects,
     pub stats: &'a StatsData,
+    pub settings: &'a AnimSettings,
     pub config_mode: bool,
     pub config_cursor: usize,
+    pub settings_open: bool,
+    pub settings_cursor: usize,
     pub last_result: Option<&'a TestResult>,
     pub last_is_pb: bool,
     pub result_shown_at: Option<Instant>,
@@ -50,10 +53,7 @@ pub fn wrap_words(engine: &TypingEngine, max_width: u16) -> Vec<Vec<WordPlacemen
         if !current.is_empty() {
             x += 1;
         }
-        current.push(WordPlacement {
-            word_idx: idx,
-            x,
-        });
+        current.push(WordPlacement { word_idx: idx, x });
         x += w_len;
     }
 
@@ -63,13 +63,24 @@ pub fn wrap_words(engine: &TypingEngine, max_width: u16) -> Vec<Vec<WordPlacemen
     lines
 }
 
+fn typing_center_y(area: Rect, mini_keyboard: bool) -> u16 {
+    if mini_keyboard && area.height >= 24 {
+        (area.y + area.height / 2).saturating_sub(2).max(area.y + 7)
+    } else {
+        (area.y + area.height / 2).max(area.y + 7)
+    }
+}
+
 pub fn compute_caret_screen_pos(
     engine: &TypingEngine,
     area: Rect,
+    mini_keyboard: bool,
+    x_nudge: i16,
 ) -> (u16, u16) {
     let box_width = area.width.saturating_sub(10).clamp(36, 76);
-    let box_x = area.x + area.width.saturating_sub(box_width) / 2;
-    let center_y = (area.y + area.height / 2).max(area.y + 7);
+    let base_x = area.x + area.width.saturating_sub(box_width) / 2;
+    let box_x = (base_x as i32 + x_nudge as i32).clamp(1, area.width.saturating_sub(2) as i32) as u16;
+    let center_y = typing_center_y(area, mini_keyboard);
 
     let lines = wrap_words(engine, box_width);
     let mut active_line = 0usize;
@@ -93,7 +104,7 @@ pub fn compute_caret_screen_pos(
 pub fn config_item_labels(
     engine: &TypingEngine,
     theme: &Theme,
-    effects: &CursorEffects,
+    settings: &AnimSettings,
 ) -> Vec<(String, bool)> {
     let mut items = Vec::new();
     let cfg = &engine.config;
@@ -120,12 +131,9 @@ pub fn config_item_labels(
         Mode::Quote => {}
     }
 
-    items.push((format!("caret:{}", effects.caret_style.label()), false));
-    items.push((
-        format!("trail:{}", if effects.trail_enabled { "on" } else { "off" }),
-        effects.trail_enabled,
-    ));
     items.push((format!("theme:{}", theme.name), false));
+    let any_fx = settings.items().iter().any(|(_, _, on)| *on);
+    items.push(("settings".to_string(), any_fx));
     items
 }
 
@@ -133,7 +141,6 @@ pub fn draw(frame: &mut Frame, state: &mut AppViewState<'_>) {
     let area = frame.area();
     let theme = state.theme;
 
-    // Paint full background
     frame.render_widget(
         Block::default().style(Style::default().bg(theme.bg).fg(theme.text)),
         area,
@@ -143,7 +150,10 @@ pub fn draw(frame: &mut Frame, state: &mut AppViewState<'_>) {
         let msg = Paragraph::new("Terminal too small (min 52x16)")
             .alignment(Alignment::Center)
             .style(Style::default().fg(theme.error).bg(theme.bg));
-        frame.render_widget(msg, Rect::new(area.x, area.y + area.height / 2, area.width, 1));
+        frame.render_widget(
+            msg,
+            Rect::new(area.x, area.y + area.height / 2, area.width, 1),
+        );
         return;
     }
 
@@ -158,44 +168,48 @@ pub fn draw(frame: &mut Frame, state: &mut AppViewState<'_>) {
     }
 
     draw_footer(frame, area, state);
+
+    if state.settings_open {
+        draw_settings_modal(frame, area, state);
+    }
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, state: &AppViewState<'_>) {
     let theme = state.theme;
     let engine = state.engine;
 
+    let mascot_w = if state.settings.mascot { 14 } else { 0 };
     let top_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(14),
+            Constraint::Length(mascot_w),
             Constraint::Min(20),
             Constraint::Length(28),
         ])
         .split(Rect::new(area.x + 2, area.y + 1, area.width.saturating_sub(4), 3));
 
-    // Animated ASCII Monkey Mascot
-    let mascot_lines = monkey_mascot(
-        state.anim_clock,
-        engine.started,
-        engine.finished,
-        engine.live_wpm(),
-        engine.combo,
-        state.last_is_pb,
-    );
-    let mascot_color = if state.last_is_pb && engine.finished {
-        theme.accent
-    } else if engine.combo >= 20 {
-        theme.accent
-    } else {
-        theme.muted
-    };
-    let mascot_para = Paragraph::new(
-        mascot_lines
-            .iter()
-            .map(|&l| Line::from(Span::styled(l, Style::default().fg(mascot_color))))
-            .collect::<Vec<_>>(),
-    );
-    frame.render_widget(mascot_para, top_chunks[0]);
+    if state.settings.mascot {
+        let mascot_lines = monkey_mascot(
+            state.anim_clock,
+            engine.started,
+            engine.finished,
+            engine.live_wpm(),
+            engine.combo,
+            state.last_is_pb,
+        );
+        let mascot_color = if (state.last_is_pb && engine.finished) || engine.combo >= 20 {
+            theme.accent
+        } else {
+            theme.muted
+        };
+        let mascot_para = Paragraph::new(
+            mascot_lines
+                .iter()
+                .map(|&l| Line::from(Span::styled(l, Style::default().fg(mascot_color))))
+                .collect::<Vec<_>>(),
+        );
+        frame.render_widget(mascot_para, top_chunks[0]);
+    }
 
     // Title + streak badge
     let mut title_spans = vec![
@@ -230,7 +244,10 @@ fn draw_header(frame: &mut Frame, area: Rect, state: &AppViewState<'_>) {
         .unwrap_or_else(|| "pb: --".to_string());
     let right_para = Paragraph::new(Line::from(vec![
         Span::styled(pb_text, Style::default().fg(theme.text)),
-        Span::styled(format!("  |  {}", theme.name), Style::default().fg(theme.muted)),
+        Span::styled(
+            format!("  |  {}", theme.name),
+            Style::default().fg(theme.muted),
+        ),
     ]))
     .alignment(Alignment::Right);
     frame.render_widget(
@@ -239,10 +256,10 @@ fn draw_header(frame: &mut Frame, area: Rect, state: &AppViewState<'_>) {
     );
 
     // Centered pill bar
-    let items = config_item_labels(engine, theme, state.effects);
+    let items = config_item_labels(engine, theme, state.settings);
     let mut spans = Vec::new();
     for (idx, (label, active)) in items.iter().enumerate() {
-        let selected = state.config_mode && idx == state.config_cursor;
+        let selected = state.config_mode && !state.settings_open && idx == state.config_cursor;
         let style = if selected {
             Style::default()
                 .fg(theme.caret_fg)
@@ -264,7 +281,7 @@ fn draw_header(frame: &mut Frame, area: Rect, state: &AppViewState<'_>) {
         Rect::new(area.x + 2, area.y + 4, area.width.saturating_sub(4), 1),
     );
 
-    if state.config_mode {
+    if state.config_mode && !state.settings_open {
         let hint = Paragraph::new("config: <-/-> move  Enter toggle  Esc/Tab resume  q quit")
             .alignment(Alignment::Center)
             .style(Style::default().fg(theme.text));
@@ -275,12 +292,38 @@ fn draw_header(frame: &mut Frame, area: Rect, state: &AppViewState<'_>) {
     }
 }
 
-fn draw_typing(frame: &mut Frame, area: Rect, state: &AppViewState<'_>) {
+fn compute_ghost_pos(engine: &TypingEngine, pace_wpm: f64) -> Option<(usize, usize)> {
+    if !engine.started || pace_wpm <= 1.0 {
+        return None;
+    }
+    let mut remaining = ((pace_wpm * 5.0 * engine.elapsed()) / 60.0).floor() as usize;
+    for (w_idx, word) in engine.words.iter().enumerate() {
+        let w_len = word.chars().count();
+        if remaining <= w_len {
+            return Some((w_idx, remaining));
+        }
+        remaining -= w_len + 1; // word + space
+    }
+    None
+}
+
+fn draw_typing(frame: &mut Frame, area: Rect, state: &mut AppViewState<'_>) {
     let theme = state.theme;
     let engine = state.engine;
+    let settings = state.settings;
     let box_width = area.width.saturating_sub(10).clamp(36, 76);
-    let box_x = area.x + area.width.saturating_sub(box_width) / 2;
-    let center_y = (area.y + area.height / 2).max(area.y + 7);
+    let base_x = area.x + area.width.saturating_sub(box_width) / 2;
+    let nudge = state.effects.typo_nudge_offset(settings.typo_nudge);
+    let box_x = (base_x as i32 + nudge as i32).clamp(1, area.width.saturating_sub(2) as i32) as u16;
+    let center_y = typing_center_y(area, settings.mini_keyboard);
+
+    let pace_wpm = state
+        .stats
+        .personal_bests
+        .get(&engine.config.pb_key())
+        .map(|pb| pb.wpm)
+        .filter(|&w| w >= 10.0)
+        .unwrap_or(60.0);
 
     // Status row above words
     let left_status = match engine.config.mode {
@@ -300,7 +343,16 @@ fn draw_typing(frame: &mut Frame, area: Rect, state: &AppViewState<'_>) {
         }
     };
     let right_status = if engine.started {
-        format!("{:.0} wpm   {:.0}% acc", engine.live_wpm(), engine.accuracy())
+        if settings.pace_caret {
+            format!(
+                "pace {:.0}  |  {:.0} wpm   {:.0}% acc",
+                pace_wpm,
+                engine.live_wpm(),
+                engine.accuracy()
+            )
+        } else {
+            format!("{:.0} wpm   {:.0}% acc", engine.live_wpm(), engine.accuracy())
+        }
     } else {
         "start typing...".to_string()
     };
@@ -319,6 +371,19 @@ fn draw_typing(frame: &mut Frame, area: Rect, state: &AppViewState<'_>) {
         status_rect,
     );
 
+    // Combo aura breathing hairline above typing box when streak >= 25
+    if settings.combo_aura && engine.combo >= 25 {
+        let pulse = ((state.anim_clock * 5.0).sin() * 0.5 + 0.5) as f32;
+        let aura_color = lerp_color(theme.accent_dim, theme.accent, pulse);
+        let fill = ((engine.combo.min(100) as usize * box_width as usize) / 100).max(4);
+        let pad = (box_width as usize - fill) / 2;
+        let bar = format!("{}{}", " ".repeat(pad), "─".repeat(fill));
+        frame.render_widget(
+            Paragraph::new(bar).style(Style::default().fg(aura_color)),
+            Rect::new(box_x, center_y.saturating_sub(1), box_width, 1),
+        );
+    }
+
     // 3-line rolling viewport
     let lines = wrap_words(engine, box_width);
     let active_line = lines
@@ -326,14 +391,33 @@ fn draw_typing(frame: &mut Frame, area: Rect, state: &AppViewState<'_>) {
         .position(|line| line.iter().any(|wp| wp.word_idx == engine.current_word_idx))
         .unwrap_or(0);
     let start_line = active_line.saturating_sub(1);
-    let (caret_x, caret_y) = compute_caret_screen_pos(engine, area);
+    state
+        .effects
+        .observe_start_line(start_line, settings.line_fade);
+    let line_fade = if settings.line_fade {
+        state.effects.line_fade_progress()
+    } else {
+        1.0
+    };
+    let scramble_p = state.effects.scramble_progress(settings.restart_scramble);
+    let ghost_pos = if settings.pace_caret {
+        compute_ghost_pos(engine, pace_wpm)
+    } else {
+        None
+    };
+
+    let (caret_x, caret_y) = compute_caret_screen_pos(engine, area, settings.mini_keyboard, nudge);
 
     let buf = frame.buffer_mut();
 
     for row_off in 0..3u16 {
         let y = center_y + row_off;
         for x in box_x..(box_x + box_width) {
-            if let Some(trail_bg) = state.effects.trail_bg_at(x, y, theme) {
+            if let Some(trail_bg) =
+                state
+                    .effects
+                    .trail_bg_at(x, y, theme, settings.soft_trail)
+            {
                 if let Some(cell) = buf.cell_mut((x, y)) {
                     cell.set_bg(trail_bg);
                 }
@@ -343,61 +427,154 @@ fn draw_typing(frame: &mut Frame, area: Rect, state: &AppViewState<'_>) {
 
     for (row_off, line) in lines.iter().skip(start_line).take(3).enumerate() {
         let y = center_y + row_off as u16;
+        let row_fade = if row_off == 2 { line_fade } else { 1.0 };
         for wp in line {
-            draw_word_cells(buf, y, box_x + wp.x, wp.word_idx, engine, theme);
-        }
-    }
-
-    // Position the real terminal hardware cursor so Kitty's native GPU cursor_trail triggers!
-    if !state.config_mode {
-        frame.set_cursor_position((caret_x, caret_y));
-        if state.effects.trail_enabled {
-            draw_caret(frame.buffer_mut(), caret_x, caret_y, state.effects, theme);
-        }
-    }
-
-    // Render floating ASCII sparks
-    let buf = frame.buffer_mut();
-    let now = Instant::now();
-    for spark in &state.effects.sparks {
-        let sx = spark.x.round() as i32;
-        let sy = spark.y.round() as i32;
-        if sx >= area.x as i32
-            && sx < (area.x + area.width) as i32
-            && sy >= (area.y + 6) as i32
-            && sy < (area.y + area.height.saturating_sub(3)) as i32
-        {
-            let age = now.duration_since(spark.born).as_secs_f32() / 0.38;
-            let base = if spark.is_error { theme.error } else { theme.accent };
-            let fg = lerp_color(base, theme.bg, age);
-            if let Some(cell) = buf.cell_mut((sx as u16, sy as u16)) {
-                if cell.symbol() == " " {
-                    let mut tmp = [0u8; 4];
-                    cell.set_symbol(spark.ch.encode_utf8(&mut tmp));
-                    cell.set_fg(fg);
+            draw_word_cells(
+                buf,
+                y,
+                box_x + wp.x,
+                wp.word_idx,
+                engine,
+                theme,
+                row_fade,
+                scramble_p,
+                state.anim_clock,
+                box_x,
+                box_width,
+            );
+            // Render Pace Caret (Ghost Racer) if on this word
+            if let Some((gw, gc)) = ghost_pos {
+                if gw == wp.word_idx {
+                    let gx = box_x + wp.x + gc as u16;
+                    if (gx != caret_x || y != caret_y) && gx < box_x + box_width {
+                        if let Some(cell) = buf.cell_mut((gx, y)) {
+                            let ghost_bg = lerp_color(theme.bg, theme.accent_dim, 0.55);
+                            cell.set_bg(ghost_bg);
+                        }
+                    }
                 }
             }
         }
     }
 
-    // Quote attribution or animated keystroke equalizer wave
-    if engine.config.mode == Mode::Quote && !engine.quote_author.is_empty() {
+    // Position the real terminal hardware cursor so Kitty's native GPU cursor_trail triggers
+    if !state.config_mode && !state.settings_open {
+        frame.set_cursor_position((caret_x, caret_y));
+        if settings.soft_trail {
+            draw_caret(frame.buffer_mut(), caret_x, caret_y, state.effects, theme);
+        }
+    }
+
+    // Render floating ASCII sparks
+    if settings.sparks {
+        let buf = frame.buffer_mut();
+        let now = Instant::now();
+        for spark in &state.effects.sparks {
+            let sx = spark.x.round() as i32;
+            let sy = spark.y.round() as i32;
+            if sx >= area.x as i32
+                && sx < (area.x + area.width) as i32
+                && sy >= (area.y + 6) as i32
+                && sy < (area.y + area.height.saturating_sub(3)) as i32
+            {
+                let age = now.duration_since(spark.born).as_secs_f32() / 0.38;
+                let base = if spark.is_error {
+                    theme.error
+                } else {
+                    theme.accent
+                };
+                let fg = lerp_color(base, theme.bg, age);
+                if let Some(cell) = buf.cell_mut((sx as u16, sy as u16)) {
+                    if cell.symbol() == " " {
+                        let mut tmp = [0u8; 4];
+                        cell.set_symbol(spark.ch.encode_utf8(&mut tmp));
+                        cell.set_fg(fg);
+                    }
+                }
+            }
+        }
+    }
+
+    // Below typing box: quote author, equalizer wave, and optional live mini-keyboard
+    let mut cursor_y = center_y + 4;
+    let footer_limit = area.y + area.height.saturating_sub(2);
+
+    if engine.config.mode == Mode::Quote && !engine.quote_author.is_empty() && cursor_y < footer_limit {
         frame.render_widget(
             Paragraph::new(format!("- {}", engine.quote_author))
                 .style(Style::default().fg(theme.muted)),
-            Rect::new(box_x, center_y + 4, box_width, 1),
+            Rect::new(box_x, cursor_y, box_width, 1),
         );
-    } else {
+        cursor_y += 2;
+    } else if settings.wave && cursor_y < footer_limit {
         let wave = keystroke_wave(state.anim_clock, state.effects.wave_energy, 24);
         frame.render_widget(
             Paragraph::new(wave)
                 .alignment(Alignment::Center)
                 .style(Style::default().fg(theme.accent_dim)),
-            Rect::new(box_x, center_y + 4, box_width, 1),
+            Rect::new(box_x, cursor_y, box_width, 1),
         );
+        cursor_y += 2;
+    }
+
+    if settings.mini_keyboard && cursor_y + 4 <= footer_limit {
+        draw_mini_keyboard(frame, area, cursor_y, state.effects, theme);
     }
 }
 
+fn draw_mini_keyboard(
+    frame: &mut Frame,
+    area: Rect,
+    top_y: u16,
+    effects: &CursorEffects,
+    theme: &Theme,
+) {
+    let rows: [&[char]; 3] = [
+        &['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+        &['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
+        &['z', 'x', 'c', 'v', 'b', 'n', 'm'],
+    ];
+
+    let mut lines: Vec<Line> = Vec::with_capacity(4);
+    for row in rows {
+        let mut spans = Vec::new();
+        for &k in row {
+            let col = effects.key_color(k, theme);
+            let is_lit = effects.key_flashes.contains_key(&k);
+            let style = if is_lit {
+                Style::default()
+                    .fg(theme.caret_fg)
+                    .bg(col)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(col).bg(theme.surface)
+            };
+            spans.push(Span::styled(format!(" {} ", k), style));
+            spans.push(Span::styled(" ", Style::default().bg(theme.bg)));
+        }
+        lines.push(Line::from(spans));
+    }
+
+    // Spacebar row
+    let sp_col = effects.key_color(' ', theme);
+    let sp_lit = effects.key_flashes.contains_key(&' ');
+    let sp_style = if sp_lit {
+        Style::default()
+            .fg(theme.caret_fg)
+            .bg(sp_col)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(sp_col).bg(theme.surface)
+    };
+    lines.push(Line::from(Span::styled("     space     ", sp_style)));
+
+    frame.render_widget(
+        Paragraph::new(lines).alignment(Alignment::Center),
+        Rect::new(area.x + 2, top_y, area.width.saturating_sub(4), 4),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
 fn draw_word_cells(
     buf: &mut Buffer,
     y: u16,
@@ -405,6 +582,11 @@ fn draw_word_cells(
     word_idx: usize,
     engine: &TypingEngine,
     theme: &Theme,
+    row_fade: f32,
+    scramble_p: f32,
+    anim_clock: f64,
+    box_x: u16,
+    box_width: u16,
 ) {
     let target: Vec<char> = engine.words[word_idx].chars().collect();
     let typed: Vec<char> = engine.typed_words[word_idx].chars().collect();
@@ -412,7 +594,7 @@ fn draw_word_cells(
 
     for i in 0..max_len {
         let cx = x + i as u16;
-        let (ch, fg, underline) = if i < typed.len() {
+        let (mut ch, mut fg, underline) = if i < typed.len() {
             if i < target.len() {
                 if typed[i] == target[i] {
                     (target[i], theme.text, false)
@@ -425,6 +607,19 @@ fn draw_word_cells(
         } else {
             (target[i], theme.muted, false)
         };
+
+        // Restart glitch-decode sweep (left-to-right across the box)
+        if scramble_p < 1.0 && typed.is_empty() {
+            let rel_x = cx.saturating_sub(box_x) as f32 / box_width.max(1) as f32;
+            if rel_x > scramble_p {
+                ch = scramble_glyph(word_idx, i, anim_clock);
+                fg = theme.accent_dim;
+            }
+        }
+
+        if row_fade < 1.0 && typed.is_empty() {
+            fg = lerp_color(theme.bg, fg, row_fade);
+        }
 
         if let Some(cell) = buf.cell_mut((cx, y)) {
             let mut tmp = [0u8; 4];
@@ -476,6 +671,23 @@ fn draw_caret(
 
 fn draw_results(frame: &mut Frame, area: Rect, state: &AppViewState<'_>, res: &TestResult) {
     let theme = state.theme;
+
+    // Subtle PB confetti rain in background when combo_aura is enabled
+    if state.settings.combo_aura && state.last_is_pb {
+        let buf = frame.buffer_mut();
+        for p in &state.effects.confetti {
+            let px = p.x.round() as u16;
+            let py = p.y.round() as u16;
+            if px > area.x && px < area.x + area.width - 1 && py > area.y + 5 && py < area.y + area.height - 1 {
+                if let Some(cell) = buf.cell_mut((px, py)) {
+                    let mut tmp = [0u8; 4];
+                    cell.set_symbol(p.ch.encode_utf8(&mut tmp));
+                    cell.set_fg(lerp_color(theme.accent_dim, theme.accent, p.accent_mix));
+                }
+            }
+        }
+    }
+
     let box_w = area.width.saturating_sub(8).min(78);
     let left_x = area.x + area.width.saturating_sub(box_w) / 2;
     let content_h = 14u16;
@@ -488,7 +700,6 @@ fn draw_results(frame: &mut Frame, area: Rect, state: &AppViewState<'_>, res: &T
         .map(|t| (t.elapsed().as_secs_f32() / 0.55).clamp(0.0, 1.0))
         .unwrap_or(1.0);
 
-    // Top row: left metrics + right full-width WPM chart inside centered box_w
     let left_col_w = 13u16;
     let gap = 2u16;
     let wpm_shown = res.wpm * reveal as f64;
@@ -524,12 +735,10 @@ fn draw_results(frame: &mut Frame, area: Rect, state: &AppViewState<'_>, res: &T
         Rect::new(left_x, top_y, left_col_w, 7),
     );
 
-    // Right animated WPM-over-time chart fills the exact remaining width of box_w
     let chart_x = left_x + left_col_w + gap;
     let chart_w = box_w.saturating_sub(left_col_w + gap);
     draw_wpm_chart(frame.buffer_mut(), chart_x, top_y, chart_w, 7, res, reveal, theme);
 
-    // Bottom detail metrics evenly distributed & centered inside box_w
     let det_y = top_y + 9;
     let cols = [
         ("test type", res.config_label.clone()),
@@ -561,13 +770,72 @@ fn draw_results(frame: &mut Frame, area: Rect, state: &AppViewState<'_>, res: &T
         );
     }
 
-    let actions = "[Tab / Enter] new test   [r] repeat   [t] theme   [Esc / q] quit";
+    let actions = "[Tab / Enter] new test   [r] repeat   [F2 / t] theme   [F3] settings   [Esc / q] quit";
     frame.render_widget(
         Paragraph::new(actions)
             .alignment(Alignment::Center)
             .style(Style::default().fg(theme.muted)),
         Rect::new(left_x, det_y + 4, box_w, 1),
     );
+}
+
+fn draw_settings_modal(frame: &mut Frame, area: Rect, state: &AppViewState<'_>) {
+    let theme = state.theme;
+    let items = state.settings.items();
+    let modal_w = area.width.saturating_sub(6).min(64);
+    let modal_h = (items.len() as u16 + 6).min(area.height.saturating_sub(2));
+    let mx = area.x + area.width.saturating_sub(modal_w) / 2;
+    let my = area.y + area.height.saturating_sub(modal_h) / 2;
+    let rect = Rect::new(mx, my, modal_w, modal_h);
+
+    frame.render_widget(Clear, rect);
+    let block = Block::default()
+        .title(" Animation & Visual Settings ")
+        .title_alignment(Alignment::Center)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.accent))
+        .style(Style::default().bg(theme.surface).fg(theme.text));
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+
+    let mut lines = Vec::new();
+    for (idx, (name, _, enabled)) in items.iter().enumerate() {
+        let selected = idx == state.settings_cursor;
+        let check = if *enabled { "[x]" } else { "[ ]" };
+        let row_style = if selected {
+            Style::default()
+                .fg(theme.caret_fg)
+                .bg(theme.accent)
+                .add_modifier(Modifier::BOLD)
+        } else if *enabled {
+            Style::default().fg(theme.text).bg(theme.surface)
+        } else {
+            Style::default().fg(theme.muted).bg(theme.surface)
+        };
+        let status = if *enabled { "ON " } else { "OFF" };
+        let pad = inner.width.saturating_sub(name.len() as u16 + 11) as usize;
+        lines.push(Line::from(Span::styled(
+            format!(" {check}  {name}{}{status} ", " ".repeat(pad)),
+            row_style,
+        )));
+    }
+
+    lines.push(Line::from(""));
+    let desc = items
+        .get(state.settings_cursor)
+        .map(|(_, d, _)| *d)
+        .unwrap_or("");
+    lines.push(Line::from(Span::styled(
+        format!(" {desc}"),
+        Style::default().fg(theme.accent),
+    )));
+    lines.push(Line::from(Span::styled(
+        " Up/Down: select | Space/Enter: toggle | a: all on | n: zen | Esc/F3: close",
+        Style::default().fg(theme.muted),
+    )));
+
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -588,7 +856,6 @@ fn draw_wpm_chart(
     let plot_w = (width - 5) as usize;
     let n = res.samples.len();
 
-    // Resample (upsample with linear interpolation or downsample) to fill the entire plot_w cleanly
     let mut net_series = Vec::with_capacity(plot_w);
     let mut raw_series = Vec::with_capacity(plot_w);
     let mut err_series = vec![false; plot_w];
@@ -633,7 +900,6 @@ fn draw_wpm_chart(
         }
     };
 
-    // Y axis
     let top_lbl = format!("{max_val:3.0} |");
     for (i, ch) in top_lbl.chars().enumerate() {
         let mut tmp = [0u8; 4];
@@ -682,7 +948,7 @@ fn draw_footer(frame: &mut Frame, area: Rect, state: &AppViewState<'_>) {
     if state.engine.finished {
         return;
     }
-    let hint = "Tab: restart | Ctrl+R: repeat | Ctrl+W: del word | Ctrl+L: trail | F2: theme | Esc: config";
+    let hint = "Tab: restart | Ctrl+R: repeat | Ctrl+W: del word | F2: theme | F3: settings | Esc: config";
     frame.render_widget(
         Paragraph::new(hint)
             .alignment(Alignment::Center)
