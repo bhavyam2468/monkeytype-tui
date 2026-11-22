@@ -222,7 +222,7 @@ fn run_app(
         }
 
         let nudge = effects.typo_nudge_offset(settings.typo_nudge);
-        let (cx, cy) = compute_caret_screen_pos(&engine, area, settings.mini_keyboard, nudge);
+        let (cx, cy) = compute_caret_screen_pos(&engine, area, nudge);
         effects.update(cx, cy, area.width, area.height, dt.as_secs_f32(), &settings);
 
         terminal.draw(|frame| {
@@ -435,23 +435,16 @@ fn run_app(
                         engine.handle_delete_word();
                     }
                     KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        let (pre_x, pre_y) =
-                            compute_caret_screen_pos(&engine, area, settings.mini_keyboard, nudge);
+                        let (pre_x, pre_y) = compute_caret_screen_pos(&engine, area, nudge);
                         match engine.handle_char(ch) {
                             CharOutcome::Correct => {
-                                effects.trigger_keystroke(
-                                    ch, pre_x, pre_y, false, false, &settings,
-                                );
+                                effects.trigger_keystroke(pre_x, pre_y, false, false, &settings);
                             }
                             CharOutcome::Error => {
-                                effects.trigger_keystroke(
-                                    ch, pre_x, pre_y, true, false, &settings,
-                                );
+                                effects.trigger_keystroke(pre_x, pre_y, true, false, &settings);
                             }
                             CharOutcome::WordCompleted { clean } => {
-                                effects.trigger_keystroke(
-                                    ch, pre_x, pre_y, !clean, clean, &settings,
-                                );
+                                effects.trigger_keystroke(pre_x, pre_y, !clean, clean, &settings);
                             }
                             CharOutcome::Ignored => {}
                         }

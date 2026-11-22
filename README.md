@@ -28,7 +28,6 @@
   - **Line Scroll Fade**: Smoothly fades in newly revealed lines as the 3-line viewport advances.
   - **Pace Caret (Ghost Racer)**: Dimmed ghost cursor moving at your personal best WPM so you can race your own PB live.
   - **Restart Scramble**: Brief glitch-decode sweep across newly generated words on restart.
-  - **Live Mini Keyboard Heatmap**: Compact QWERTY layout below the text where keys flash on every press and fade smoothly.
   - **Combo Aura & PB Confetti**: Breathing streak progress bar at 25x+ combos and gentle ASCII confetti rain on new personal bests.
   - **Typo Micro-Shake**: Tactile 1-cell horizontal nudge on missed keystrokes.
   - **Smooth Theme Cross-Fade**: RGB interpolation when switching themes (`F2`) or when DMS updates your system palette.

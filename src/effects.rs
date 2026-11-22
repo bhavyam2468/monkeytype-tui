@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use rand::Rng;
@@ -23,6 +23,7 @@ impl CaretStyle {
         }
     }
 
+    #[allow(dead_code)]
     pub fn label(self) -> &'static str {
         match self {
             Self::Block => "block",
@@ -51,12 +52,6 @@ pub struct Spark {
 }
 
 #[derive(Debug, Clone)]
-pub struct KeyFlash {
-    pub born: Instant,
-    pub is_error: bool,
-}
-
-#[derive(Debug, Clone)]
 pub struct ConfettiPiece {
     pub x: f32,
     pub y: f32,
@@ -71,7 +66,6 @@ pub struct CursorEffects {
     pub trail: VecDeque<TrailCell>,
     pub sparks: Vec<Spark>,
     pub confetti: Vec<ConfettiPiece>,
-    pub key_flashes: HashMap<char, KeyFlash>,
 
     cur_fx: f32,
     cur_fy: f32,
@@ -94,7 +88,6 @@ impl CursorEffects {
             trail: VecDeque::with_capacity(64),
             sparks: Vec::new(),
             confetti: Vec::new(),
-            key_flashes: HashMap::new(),
             cur_fx: 0.0,
             cur_fy: 0.0,
             initialized: false,
@@ -125,7 +118,6 @@ impl CursorEffects {
 
     pub fn trigger_keystroke(
         &mut self,
-        ch: char,
         x: u16,
         y: u16,
         is_error: bool,
@@ -134,16 +126,6 @@ impl CursorEffects {
     ) {
         let now = Instant::now();
         self.wave_energy = (self.wave_energy + 0.45).min(1.0);
-
-        if settings.mini_keyboard {
-            self.key_flashes.insert(
-                ch.to_ascii_lowercase(),
-                KeyFlash {
-                    born: now,
-                    is_error,
-                },
-            );
-        }
 
         if is_error {
             self.error_flash_until = Some(now + Duration::from_millis(160));
@@ -303,11 +285,6 @@ impl CursorEffects {
         self.sparks
             .retain(|s| now.duration_since(s.born) <= spark_ttl);
 
-        // Expire keyboard flashes
-        let key_ttl = Duration::from_millis(360);
-        self.key_flashes
-            .retain(|_, f| now.duration_since(f.born) <= key_ttl);
-
         // Animate PB confetti rain
         if settings.combo_aura && !self.confetti.is_empty() {
             let max_x = area_w.saturating_sub(2).max(4) as f32;
@@ -355,20 +332,6 @@ impl CursorEffects {
             Some(lerp_color(theme.bg, base, best_strength * 0.55))
         } else {
             None
-        }
-    }
-
-    pub fn key_color(&self, key: char, theme: &Theme) -> Color {
-        if let Some(flash) = self.key_flashes.get(&key.to_ascii_lowercase()) {
-            let age = (flash.born.elapsed().as_secs_f32() / 0.36).clamp(0.0, 1.0);
-            let peak = if flash.is_error {
-                theme.error
-            } else {
-                theme.accent
-            };
-            lerp_color(peak, theme.muted, age)
-        } else {
-            theme.muted
         }
     }
 

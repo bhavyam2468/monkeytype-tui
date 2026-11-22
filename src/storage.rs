@@ -35,7 +35,6 @@ pub struct AnimSettings {
     pub line_fade: bool,
     pub pace_caret: bool,
     pub restart_scramble: bool,
-    pub mini_keyboard: bool,
     pub combo_aura: bool,
     pub typo_nudge: bool,
     pub theme_fade: bool,
@@ -51,7 +50,6 @@ impl Default for AnimSettings {
             line_fade: true,
             pace_caret: true,
             restart_scramble: true,
-            mini_keyboard: true,
             combo_aura: true,
             typo_nudge: true,
             theme_fade: true,
@@ -64,14 +62,13 @@ impl Default for AnimSettings {
 }
 
 impl AnimSettings {
-    pub const COUNT: usize = 11;
+    pub const COUNT: usize = 10;
 
     pub fn items(&self) -> [(&'static str, &'static str, bool); Self::COUNT] {
         [
             ("Line Scroll Fade", "Smoothly fade incoming lines when scrolling", self.line_fade),
             ("Pace Caret (Ghost)", "Race a dimmed ghost cursor at your PB WPM", self.pace_caret),
             ("Restart Scramble", "Glitch-decode animation when starting fresh words", self.restart_scramble),
-            ("Mini Keyboard", "Live QWERTY heatmap reacting to every keypress", self.mini_keyboard),
             ("Combo Aura & Confetti", "Breathing streak bar and PB confetti rain", self.combo_aura),
             ("Typo Micro-Shake", "Subtle 1-cell horizontal nudge on missed keys", self.typo_nudge),
             ("Theme Cross-Fade", "Smooth RGB transition on F2 or DMS theme sync", self.theme_fade),
@@ -87,14 +84,13 @@ impl AnimSettings {
             0 => self.line_fade = !self.line_fade,
             1 => self.pace_caret = !self.pace_caret,
             2 => self.restart_scramble = !self.restart_scramble,
-            3 => self.mini_keyboard = !self.mini_keyboard,
-            4 => self.combo_aura = !self.combo_aura,
-            5 => self.typo_nudge = !self.typo_nudge,
-            6 => self.theme_fade = !self.theme_fade,
-            7 => self.sparks = !self.sparks,
-            8 => self.mascot = !self.mascot,
-            9 => self.wave = !self.wave,
-            10 => self.soft_trail = !self.soft_trail,
+            3 => self.combo_aura = !self.combo_aura,
+            4 => self.typo_nudge = !self.typo_nudge,
+            5 => self.theme_fade = !self.theme_fade,
+            6 => self.sparks = !self.sparks,
+            7 => self.mascot = !self.mascot,
+            8 => self.wave = !self.wave,
+            9 => self.soft_trail = !self.soft_trail,
             _ => {}
         }
     }
@@ -103,7 +99,6 @@ impl AnimSettings {
         self.line_fade = enabled;
         self.pace_caret = enabled;
         self.restart_scramble = enabled;
-        self.mini_keyboard = enabled;
         self.combo_aura = enabled;
         self.typo_nudge = enabled;
         self.theme_fade = enabled;

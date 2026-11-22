@@ -63,24 +63,15 @@ pub fn wrap_words(engine: &TypingEngine, max_width: u16) -> Vec<Vec<WordPlacemen
     lines
 }
 
-fn typing_center_y(area: Rect, mini_keyboard: bool) -> u16 {
-    if mini_keyboard && area.height >= 24 {
-        (area.y + area.height / 2).saturating_sub(2).max(area.y + 7)
-    } else {
-        (area.y + area.height / 2).max(area.y + 7)
-    }
-}
-
 pub fn compute_caret_screen_pos(
     engine: &TypingEngine,
     area: Rect,
-    mini_keyboard: bool,
     x_nudge: i16,
 ) -> (u16, u16) {
     let box_width = area.width.saturating_sub(10).clamp(36, 76);
     let base_x = area.x + area.width.saturating_sub(box_width) / 2;
     let box_x = (base_x as i32 + x_nudge as i32).clamp(1, area.width.saturating_sub(2) as i32) as u16;
-    let center_y = typing_center_y(area, mini_keyboard);
+    let center_y = (area.y + area.height / 2).max(area.y + 7);
 
     let lines = wrap_words(engine, box_width);
     let mut active_line = 0usize;
@@ -315,7 +306,7 @@ fn draw_typing(frame: &mut Frame, area: Rect, state: &mut AppViewState<'_>) {
     let base_x = area.x + area.width.saturating_sub(box_width) / 2;
     let nudge = state.effects.typo_nudge_offset(settings.typo_nudge);
     let box_x = (base_x as i32 + nudge as i32).clamp(1, area.width.saturating_sub(2) as i32) as u16;
-    let center_y = typing_center_y(area, settings.mini_keyboard);
+    let center_y = (area.y + area.height / 2).max(area.y + 7);
 
     let pace_wpm = state
         .stats
@@ -406,7 +397,7 @@ fn draw_typing(frame: &mut Frame, area: Rect, state: &mut AppViewState<'_>) {
         None
     };
 
-    let (caret_x, caret_y) = compute_caret_screen_pos(engine, area, settings.mini_keyboard, nudge);
+    let (caret_x, caret_y) = compute_caret_screen_pos(engine, area, nudge);
 
     let buf = frame.buffer_mut();
 
@@ -495,8 +486,8 @@ fn draw_typing(frame: &mut Frame, area: Rect, state: &mut AppViewState<'_>) {
         }
     }
 
-    // Below typing box: quote author, equalizer wave, and optional live mini-keyboard
-    let mut cursor_y = center_y + 4;
+    // Below typing box: quote author or animated equalizer wave
+    let cursor_y = center_y + 4;
     let footer_limit = area.y + area.height.saturating_sub(2);
 
     if engine.config.mode == Mode::Quote && !engine.quote_author.is_empty() && cursor_y < footer_limit {
@@ -505,7 +496,6 @@ fn draw_typing(frame: &mut Frame, area: Rect, state: &mut AppViewState<'_>) {
                 .style(Style::default().fg(theme.muted)),
             Rect::new(box_x, cursor_y, box_width, 1),
         );
-        cursor_y += 2;
     } else if settings.wave && cursor_y < footer_limit {
         let wave = keystroke_wave(state.anim_clock, state.effects.wave_energy, 24);
         frame.render_widget(
@@ -514,64 +504,7 @@ fn draw_typing(frame: &mut Frame, area: Rect, state: &mut AppViewState<'_>) {
                 .style(Style::default().fg(theme.accent_dim)),
             Rect::new(box_x, cursor_y, box_width, 1),
         );
-        cursor_y += 2;
     }
-
-    if settings.mini_keyboard && cursor_y + 4 <= footer_limit {
-        draw_mini_keyboard(frame, area, cursor_y, state.effects, theme);
-    }
-}
-
-fn draw_mini_keyboard(
-    frame: &mut Frame,
-    area: Rect,
-    top_y: u16,
-    effects: &CursorEffects,
-    theme: &Theme,
-) {
-    let rows: [&[char]; 3] = [
-        &['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
-        &['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
-        &['z', 'x', 'c', 'v', 'b', 'n', 'm'],
-    ];
-
-    let mut lines: Vec<Line> = Vec::with_capacity(4);
-    for row in rows {
-        let mut spans = Vec::new();
-        for &k in row {
-            let col = effects.key_color(k, theme);
-            let is_lit = effects.key_flashes.contains_key(&k);
-            let style = if is_lit {
-                Style::default()
-                    .fg(theme.caret_fg)
-                    .bg(col)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(col).bg(theme.surface)
-            };
-            spans.push(Span::styled(format!(" {} ", k), style));
-            spans.push(Span::styled(" ", Style::default().bg(theme.bg)));
-        }
-        lines.push(Line::from(spans));
-    }
-
-    // Spacebar row
-    let sp_col = effects.key_color(' ', theme);
-    let sp_lit = effects.key_flashes.contains_key(&' ');
-    let sp_style = if sp_lit {
-        Style::default()
-            .fg(theme.caret_fg)
-            .bg(sp_col)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(sp_col).bg(theme.surface)
-    };
-    lines.push(Line::from(Span::styled("     space     ", sp_style)));
-
-    frame.render_widget(
-        Paragraph::new(lines).alignment(Alignment::Center),
-        Rect::new(area.x + 2, top_y, area.width.saturating_sub(4), 4),
-    );
 }
 
 #[allow(clippy::too_many_arguments)]
