@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Monkeytype
+Comment=Minimalist terminal typing test with Kitty cursor trail and DMS theme sync
+Exec=kitty --class monkeytype-tui --title "Monkeytype" monkeytype-tui
+Icon=monkeytype-tui
+Terminal=false
+Type=Application
+Categories=Utility;Game;
+Keywords=typing;monkeytype;wpm;tui;

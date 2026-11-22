@@ -1,0 +1,282 @@
+use std::collections::VecDeque;
+use std::time::{Duration, Instant};
+
+use ratatui::style::Color;
+
+use crate::themes::{lerp_color, Theme};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaretStyle {
+    Block,
+    Beam,
+    Underline,
+}
+
+impl CaretStyle {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Block => Self::Beam,
+            Self::Beam => Self::Underline,
+            Self::Underline => Self::Block,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Block => "block",
+            Self::Beam => "beam",
+            Self::Underline => "under",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TrailCell {
+    pub x: u16,
+    pub y: u16,
+    pub born: Instant,
+}
+
+#[derive(Debug, Clone)]
+pub struct Spark {
+    pub x: f32,
+    pub y: f32,
+    pub vx: f32,
+    pub vy: f32,
+    pub ch: char,
+    pub born: Instant,
+    pub is_error: bool,
+}
+
+pub struct CursorEffects {
+    pub trail_enabled: bool,
+    pub caret_style: CaretStyle,
+    pub trail: VecDeque<TrailCell>,
+    pub sparks: Vec<Spark>,
+    cur_fx: f32,
+    cur_fy: f32,
+    initialized: bool,
+    pub error_flash_until: Option<Instant>,
+    pub wave_energy: f32,
+    pub start_instant: Instant,
+}
+
+impl CursorEffects {
+    pub fn new() -> Self {
+        Self {
+            // Default to false so Kitty's native GPU cursor_trail shines unobstructed;
+            // Ctrl+L toggles the extra software RGB trail.
+            trail_enabled: false,
+            caret_style: CaretStyle::Block,
+            trail: VecDeque::with_capacity(64),
+            sparks: Vec::new(),
+            cur_fx: 0.0,
+            cur_fy: 0.0,
+            initialized: false,
+            error_flash_until: None,
+            wave_energy: 0.0,
+            start_instant: Instant::now(),
+        }
+    }
+
+    pub fn reset_positions(&mut self) {
+        self.trail.clear();
+        self.sparks.clear();
+        self.initialized = false;
+        self.error_flash_until = None;
+        self.wave_energy = 0.0;
+    }
+
+    pub fn trigger_keystroke(&mut self, x: u16, y: u16, is_error: bool, word_done: bool) {
+        let now = Instant::now();
+        self.wave_energy = (self.wave_energy + 0.45).min(1.0);
+
+        if is_error {
+            self.error_flash_until = Some(now + Duration::from_millis(160));
+            for &(vx, vy, ch) in &[(-0.4, -0.35, '×'), (0.4, -0.35, '×')] {
+                self.sparks.push(Spark {
+                    x: x as f32,
+                    y: y as f32,
+                    vx,
+                    vy,
+                    ch,
+                    born: now,
+                    is_error: true,
+                });
+            }
+        } else if word_done {
+            for &(vx, vy, ch) in &[(-0.5, -0.4, '✦'), (0.0, -0.5, '⋆'), (0.5, -0.4, '·')] {
+                self.sparks.push(Spark {
+                    x: x as f32,
+                    y: y as f32,
+                    vx,
+                    vy,
+                    ch,
+                    born: now,
+                    is_error: false,
+                });
+            }
+        }
+    }
+
+    pub fn update(&mut self, target_x: u16, target_y: u16, dt_secs: f32) {
+        let now = Instant::now();
+        self.wave_energy = (self.wave_energy - dt_secs * 2.2).max(0.0);
+
+        if !self.initialized {
+            self.cur_fx = target_x as f32;
+            self.cur_fy = target_y as f32;
+            self.initialized = true;
+        } else {
+            // Smooth Kitty-like cursor smear interpolation
+            let tx = target_x as f32;
+            let ty = target_y as f32;
+            let dist = ((tx - self.cur_fx).powi(2) + (ty - self.cur_fy).powi(2)).sqrt();
+
+            if dist > 0.1 {
+                let steps = (dist.ceil() as usize).clamp(1, 16);
+                for s in 0..steps {
+                    let frac = (s + 1) as f32 / steps as f32;
+                    let ix = (self.cur_fx + (tx - self.cur_fx) * frac).round() as u16;
+                    let iy = (self.cur_fy + (ty - self.cur_fy) * frac).round() as u16;
+                    if self.trail_enabled {
+                        self.trail.push_back(TrailCell {
+                            x: ix,
+                            y: iy,
+                            born: now,
+                        });
+                    }
+                }
+            }
+
+            let speed = (dt_secs * 28.0).clamp(0.15, 1.0);
+            self.cur_fx += (tx - self.cur_fx) * speed;
+            self.cur_fy += (ty - self.cur_fy) * speed;
+            if (tx - self.cur_fx).abs() < 0.05 && (ty - self.cur_fy).abs() < 0.05 {
+                self.cur_fx = tx;
+                self.cur_fy = ty;
+            }
+        }
+
+        // Expire trail cells after 300ms
+        let trail_ttl = Duration::from_millis(300);
+        while let Some(front) = self.trail.front() {
+            if now.duration_since(front.born) > trail_ttl {
+                self.trail.pop_front();
+            } else {
+                break;
+            }
+        }
+
+        // Update & expire sparks
+        let spark_ttl = Duration::from_millis(380);
+        for spark in &mut self.sparks {
+            spark.x += spark.vx * dt_secs * 18.0;
+            spark.y += spark.vy * dt_secs * 12.0;
+        }
+        self.sparks
+            .retain(|s| now.duration_since(s.born) <= spark_ttl);
+    }
+
+    pub fn trail_bg_at(&self, x: u16, y: u16, theme: &Theme) -> Option<Color> {
+        if !self.trail_enabled {
+            return None;
+        }
+        let now = Instant::now();
+        let mut best_strength: f32 = 0.0;
+        for cell in &self.trail {
+            if cell.x == x && cell.y == y {
+                let age = now.duration_since(cell.born).as_secs_f32() / 0.30;
+                let strength = (1.0 - age).clamp(0.0, 1.0);
+                if strength > best_strength {
+                    best_strength = strength;
+                }
+            }
+        }
+        if best_strength > 0.03 {
+            let base = if self
+                .error_flash_until
+                .map(|t| now < t)
+                .unwrap_or(false)
+            {
+                theme.error
+            } else {
+                theme.accent
+            };
+            Some(lerp_color(theme.bg, base, best_strength * 0.55))
+        } else {
+            None
+        }
+    }
+
+    pub fn caret_color(&self, theme: &Theme) -> Color {
+        let now = Instant::now();
+        if self.error_flash_until.map(|t| now < t).unwrap_or(false) {
+            return theme.error;
+        }
+        let elapsed = now.duration_since(self.start_instant).as_secs_f32();
+        let pulse = (elapsed * 4.2).sin() * 0.5 + 0.5;
+        lerp_color(theme.caret_bg, theme.accent, pulse * 0.35)
+    }
+}
+
+/// Returns a 3-line animated ASCII monkey mascot reacting to typing state & speed.
+pub fn monkey_mascot(
+    elapsed_secs: f64,
+    started: bool,
+    finished: bool,
+    wpm: f64,
+    combo: u32,
+    is_pb: bool,
+) -> [&'static str; 3] {
+    let tick = (elapsed_secs * 6.0) as usize;
+    if finished {
+        if is_pb {
+            return match tick % 2 {
+                0 => ["  \\o/  *PB*", " ( ^.^ )  ", "  /===\\   "],
+                _ => [" *\\o/* PB!", " ( ^o^ )  ", "  /===\\   "],
+            };
+        }
+        return ["  (o.o)   ", "  /( )\\   ", "  [___]   "];
+    }
+
+    if !started {
+        // Gentle idle blink
+        if tick % 18 == 0 {
+            return ["  (-.-)   ", "  /( )\\   ", "  [===]   "];
+        }
+        return ["  (o.o)   ", "  /( )\\   ", "  [===]   "];
+    }
+
+    let fast_tick = if wpm > 80.0 {
+        (elapsed_secs * 14.0) as usize
+    } else {
+        (elapsed_secs * 8.0) as usize
+    };
+
+    if combo >= 20 {
+        return match fast_tick % 3 {
+            0 => [" ~(>.<)~* ", " d(   )p  ", "  [===]   "],
+            1 => [" *(^.^)*~ ", " q(   )b  ", "  [===]   "],
+            _ => [" ~(o.o)~* ", " /(   )\\  ", "  [===]   "],
+        };
+    }
+
+    match fast_tick % 2 {
+        0 => ["  (o.o)   ", " d(   )p  ", "  [===]   "],
+        _ => ["  (o.o)   ", " q(   )b  ", "  [===]   "],
+    }
+}
+
+/// Animated ASCII keystroke wave bar.
+pub fn keystroke_wave(elapsed_secs: f64, energy: f32, width: usize) -> String {
+    let bars = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let mut out = String::with_capacity(width);
+    for i in 0..width {
+        let phase = elapsed_secs * 7.5 + (i as f64) * 0.45;
+        let wave = ((phase.sin() * 0.5 + 0.5) as f32) * (0.15 + energy * 0.85);
+        let idx = ((wave * (bars.len() - 1) as f32).round() as usize).min(bars.len() - 1);
+        out.push(bars[idx]);
+    }
+    out
+}

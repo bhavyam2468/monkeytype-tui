@@ -1,0 +1,15 @@
+[package]
+name = "monkeytype-tui"
+version = "0.1.0"
+edition = "2021"
+description = "A fast, minimalist terminal typing test with Kitty cursor trail support, ASCII animations, and DMS theme sync"
+license = "MIT"
+repository = "https://github.com/bhavyam2468/monkeytype-tui"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+crossterm = "0.28"
+rand = "0.8"
+ratatui = "0.29"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
