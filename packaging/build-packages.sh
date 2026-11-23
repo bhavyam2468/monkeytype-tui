@@ -16,10 +16,26 @@ fi
 rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 
+# 0. Direct standalone binaries (run directly or double-click with auto-terminal launch)
+install -m755 "$BIN" "$DIST_DIR/monkeytype-tui-linux-x86_64"
+echo "Built: dist/monkeytype-tui-linux-x86_64"
+
+STATIC_BIN="$ROOT_DIR/target/x86_64-unknown-linux-musl/release/monkeytype-tui"
+if [[ -x "$STATIC_BIN" ]]; then
+  install -m755 "$STATIC_BIN" "$DIST_DIR/monkeytype-tui-linux-x86_64-static"
+  echo "Built: dist/monkeytype-tui-linux-x86_64-static"
+fi
+
+# Prefer static musl binary inside AppImage and tarball if available for max portability
+PORTABLE_BIN="$BIN"
+if [[ -x "$STATIC_BIN" ]]; then
+  PORTABLE_BIN="$STATIC_BIN"
+fi
+
 # 1. Generic Linux tar.gz archive
 TAR_STAGE="$DIST_DIR/stage-tar/monkeytype-tui-${VERSION}-x86_64-linux"
 mkdir -p "$TAR_STAGE"
-cp "$BIN" "$TAR_STAGE/monkeytype-tui"
+cp "$PORTABLE_BIN" "$TAR_STAGE/monkeytype-tui"
 cp "$DESKTOP" "$TAR_STAGE/monkeytype-tui.desktop"
 cp "$ICON" "$TAR_STAGE/monkeytype-tui.png"
 cp "$ROOT_DIR/LICENSE" "$TAR_STAGE/LICENSE"
@@ -70,7 +86,7 @@ echo "Built: dist/monkeytype-tui_${VERSION}_amd64.deb"
 APPDIR="$DIST_DIR/MonkeytypeTUI.AppDir"
 mkdir -p "$APPDIR/usr/bin"
 mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
-install -m755 "$BIN" "$APPDIR/usr/bin/monkeytype-tui"
+install -m755 "$PORTABLE_BIN" "$APPDIR/usr/bin/monkeytype-tui"
 install -m644 "$ICON" "$APPDIR/monkeytype-tui.png"
 install -m644 "$ICON" "$APPDIR/usr/share/icons/hicolor/256x256/apps/monkeytype-tui.png"
 cat > "$APPDIR/monkeytype-tui.desktop" <<EOF

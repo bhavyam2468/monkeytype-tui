@@ -5,7 +5,9 @@ mod themes;
 mod ui;
 mod words;
 
-use std::io;
+use std::env;
+use std::io::{self, IsTerminal};
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 use clap::{Parser, ValueEnum};
@@ -76,6 +78,15 @@ fn main() -> io::Result<()> {
         return Ok(());
     }
 
+    // If double-clicked from a GUI file manager (no TTY attached), auto-launch inside a terminal
+    if (!io::stdin().is_terminal() || !io::stdout().is_terminal())
+        && env::var_os("MONKEYTYPE_TUI_SPAWNED").is_none()
+    {
+        if try_relaunch_in_terminal() {
+            return Ok(());
+        }
+    }
+
     let config = TestConfig {
         mode: match cli.mode {
             CliMode::Time => Mode::Time,
@@ -111,6 +122,64 @@ fn main() -> io::Result<()> {
     terminal.show_cursor()?;
 
     res
+}
+
+#[cfg(unix)]
+fn try_relaunch_in_terminal() -> bool {
+    let Ok(exe) = env::current_exe() else {
+        return false;
+    };
+    let args: Vec<String> = env::args().skip(1).collect();
+
+    let mut candidates: Vec<String> = Vec::new();
+    if let Ok(term) = env::var("TERMINAL") {
+        if !term.trim().is_empty() {
+            candidates.push(term);
+        }
+    }
+    for term in [
+        "kitty",
+        "ghostty",
+        "alacritty",
+        "wezterm",
+        "foot",
+        "gnome-terminal",
+        "konsole",
+        "xfce4-terminal",
+        "xterm",
+        "x-terminal-emulator",
+    ] {
+        candidates.push(term.to_string());
+    }
+
+    for term in candidates {
+        let mut cmd = Command::new(&term);
+        cmd.env("MONKEYTYPE_TUI_SPAWNED", "1");
+        match term.as_str() {
+            "kitty" => {
+                cmd.args(["--class", "monkeytype-tui", "--title", "Monkeytype"]);
+                cmd.arg(&exe).args(&args);
+            }
+            "gnome-terminal" => {
+                cmd.arg("--").arg(&exe).args(&args);
+            }
+            "wezterm" => {
+                cmd.args(["start", "--"]).arg(&exe).args(&args);
+            }
+            _ => {
+                cmd.arg("-e").arg(&exe).args(&args);
+            }
+        }
+        if cmd.spawn().is_ok() {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(not(unix))]
+fn try_relaunch_in_terminal() -> bool {
+    false
 }
 
 fn run_app(

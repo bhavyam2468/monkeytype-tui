@@ -40,28 +40,56 @@
 
 ---
 
-## Installation
+## Quick Run (No Install Required)
 
-Pre-built Linux packages are available on the [Releases](https://github.com/bhavyam2468/monkeytype-tui/releases/latest) page.
+Download a single runnable binary or AppImage from the [Releases](https://github.com/bhavyam2468/monkeytype-tui/releases/latest) page and run it immediately. When double-clicked from a Linux file manager, the binary automatically opens inside your terminal emulator (`$TERMINAL`, Kitty, Ghostty, Alacritty, WezTerm, Foot, GNOME Terminal, Konsole, or XTerm).
 
-### AppImage (Universal Linux)
+### Direct Standalone Binary (Linux Static, Works on Any Distro)
 
 ```bash
-chmod +x monkeytype-tui-0.2.0-x86_64.AppImage
-./monkeytype-tui-0.2.0-x86_64.AppImage
+curl -fsSL https://github.com/bhavyam2468/monkeytype-tui/releases/latest/download/monkeytype-tui-linux-x86_64-static -o monkeytype-tui
+chmod +x monkeytype-tui
+./monkeytype-tui
 ```
+
+You can also double-click `monkeytype-tui-linux-x86_64-static` (or `monkeytype-tui-linux-x86_64`) directly from your file manager.
+
+### One-Click AppImage (Universal Linux)
+
+```bash
+chmod +x monkeytype-tui-0.2.1-x86_64.AppImage
+./monkeytype-tui-0.2.1-x86_64.AppImage
+```
+
+Double-clicking the AppImage launches it in your terminal automatically.
+
+### Windows & macOS Direct Binaries
+
+- **Windows**: Download `monkeytype-tui-windows-x86_64.exe` and double-click to run (no install required).
+- **macOS**: Download `monkeytype-tui-macos-arm64` (Apple Silicon) or `monkeytype-tui-macos-x86_64` (Intel), run `chmod +x`, and execute.
+
+---
+
+## System Packages
 
 ### Debian / Ubuntu (`.deb`)
 
 ```bash
-sudo apt install ./monkeytype-tui_0.2.0_amd64.deb
+sudo apt install ./monkeytype-tui_0.2.1_amd64.deb
+monkeytype-tui
+```
+
+### Fedora / RHEL / openSUSE (`.rpm`)
+
+```bash
+sudo dnf install ./monkeytype-tui-0.2.1-1.*.x86_64.rpm
 monkeytype-tui
 ```
 
 ### Arch Linux (`.pkg.tar.zst` / `PKGBUILD`)
 
 ```bash
-sudo pacman -U monkeytype-tui-0.2.0-1-x86_64.pkg.tar.zst
+sudo pacman -U monkeytype-tui-0.2.1-1-x86_64.pkg.tar.zst
 ```
 
 Or build locally from the included `PKGBUILD`:
@@ -73,8 +101,8 @@ cd packaging && makepkg -si
 ### Standalone Binary Tarball (`.tar.gz`)
 
 ```bash
-tar -xzf monkeytype-tui-0.2.0-x86_64-linux.tar.gz
-cd monkeytype-tui-0.2.0-x86_64-linux
+tar -xzf monkeytype-tui-0.2.1-x86_64-linux.tar.gz
+cd monkeytype-tui-0.2.1-x86_64-linux
 ./monkeytype-tui
 ```
 
